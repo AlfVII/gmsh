@@ -1417,7 +1417,16 @@ void GenerateMesh(GModel *m, int ask)
     Msg::Info("I'm busy! Ask me that later...");
     return;
   }
-  CTX::instance()->lock = 1;
+  // RAII, not a bare flag: the C++ API converts Msg::Error into exceptions (e.g. tetgen's
+  // "PLC Error: A segment and a facet intersect"), and those escape GenerateMesh mid-flight.
+  // With a bare `lock = 1 ... lock = 0` the unlock is skipped, and every subsequent generate()
+  // in the process hits the guard above, prints "I'm busy!" and returns an EMPTY mesh -- which a
+  // caller retrying at a finer size reads as "meshing failed at every size" when nothing was ever
+  // attempted. The guard releases the lock on every exit path, exceptional or not.
+  struct MeshLockGuard {
+    MeshLockGuard() { CTX::instance()->lock = 1; }
+    ~MeshLockGuard() { CTX::instance()->lock = 0; }
+  } meshLockGuard;
 
   Msg::ResetErrorCounter();
 
@@ -1575,6 +1584,5 @@ void GenerateMesh(GModel *m, int ask)
 
   if(qqs != nullptr) delete qqs;
 
-  CTX::instance()->lock = 0;
   // ProfilerStop();
 }
