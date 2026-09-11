@@ -281,7 +281,18 @@ static void _relocateVertexOfPyramid(MVertex *ver,
     SPoint3 c = q.barycenter();
     SVector3 d(x - c.x(), y - c.y(), z - c.z());
     if(dot(n, d) < 0) n = n * (-1.0);
-    double H = .5 * sqrt(fabs(A));
+    // OMFEM patch (2026-09-11): the apex target height was 0.5*sqrt(area). On the strongly
+    // anisotropic quads of a graded boundary-layer hex mesh (0.066 x 0.8 mm on a swept
+    // conductor) that is 2-4x the quad's short edge, the surrounding tets cannot follow and
+    // every relaxation step is refused: the apex stays where reconstructmesh created it, ON
+    // the quad (909 flattened pyramids, height ~1e-4 mm, on 03_buck). Cap the height at half
+    // the shortest quad edge; on an isotropic quad this is the old value.
+    double emin = 1e300;
+    for(int k = 0; k < 4; k++) {
+      MVertex *a = q.getVertex(k), *b = q.getVertex((k + 1) % 4);
+      emin = std::min(emin, a->distance(b));
+    }
+    double H = std::min(.5 * sqrt(fabs(A)), .5 * emin);
     double XOPT = c.x() + relax * H * n.x();
     double YOPT = c.y() + relax * H * n.y();
     double ZOPT = c.z() + relax * H * n.z();
