@@ -1658,6 +1658,10 @@ StringXNumber MeshOptions_Number[] = {
   { F|O, "ToleranceEdgeLength" , opt_mesh_tolerance_edge_length, 0.0,
     "Skip a model edge in mesh generation if its length is less than user's "
     "defined tolerance" },
+  { F|O, "PyramidApexMaxHeight" , opt_mesh_pyramid_apex_max_height, 0.,
+    "Hybrid tet/hex meshes: maximum offset of a pyramid apex from its quad (model units; "
+    "0 = 0.4 x the shortest quad edge, capped by 0.3 x the local mesh size). Set it below "
+    "the smallest clearance between quad-bounded volumes so the apex fans cannot cross a gap" },
   { F|O, "ToleranceInitialDelaunay" , opt_mesh_tolerance_initial_delaunay, 1.e-12,
     "Tolerance for initial 3D Delaunay mesher" },
   { F|O, "ToleranceReferenceElement" , opt_mesh_tolerance_reference_element , 1e-6,
