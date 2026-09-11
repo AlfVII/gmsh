@@ -466,6 +466,7 @@ double opt_mesh_lc_min(OPT_ARGS_NUM);
 double opt_mesh_lc_max(OPT_ARGS_NUM);
 double opt_mesh_tolerance_edge_length(OPT_ARGS_NUM);
 double opt_mesh_tolerance_initial_delaunay(OPT_ARGS_NUM);
+double opt_mesh_pyramid_apex_max_height(OPT_ARGS_NUM);
 double opt_mesh_lc_factor(OPT_ARGS_NUM);
 double opt_mesh_lc_from_curvature(OPT_ARGS_NUM);
 double opt_mesh_lc_from_curvature_iso(OPT_ARGS_NUM);

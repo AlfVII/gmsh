@@ -18,6 +18,7 @@
 #include "GModel.h"
 #include "GRegion.h"
 #include "GFace.h"
+#include "GPoint.h"
 #include "MVertex.h"
 #include "MLine.h"
 #include "MPoint.h"
@@ -25,6 +26,8 @@
 #include "MQuadrangle.h"
 #include "MTetrahedron.h"
 #include "Context.h"
+#include "ExtrudeParams.h"
+#include "BackgroundMeshTools.h"
 #include "OS.h"
 #if !defined(HAVE_NO_STDINT_H)
 #include <stdint.h>
@@ -168,15 +171,90 @@ namespace tetgenBR {
           all.insert(v2);
         }
         if(_sqr) {
+          // OMFEM patch (2026-09-11): create the pyramid apex INSIDE the region instead of on
+          // the quad. The stock code puts it at the quad centroid (in the face) and relies on
+          // RelocateVerticesOfPyramids to inflate the pyramid afterwards; on elongated quads
+          // (graded boundary-layer hex blocks swept along a conductor, 0.04-0.26 x 1 mm)
+          // tetgen connects the in-plane apex to its own quad corners with zero-volume tets,
+          // every relaxation step is refused, and ~2 % of the pyramids stay flat (negative
+          // Jacobian). With the apex offset into the region the four fan triangles bulge into
+          // the volume, tetgen sees a valid PLC, and the pyramid is a real pyramid from the
+          // start. Height: 0.4 x shortest quad edge, capped by 0.3 x the local background
+          // size (thin gaps). Direction: the region-side normal, taken from the face
+          // orientation and verified once per face against the OCC solid; without OCC (or
+          // when the test fails) the apex stays on the quad, as before.
+          double sideSign = 0.0;
+          if(gf->quadrangles.size()) {
+            // MeshDelaunayVolume merges every region of the connected set into _gr before
+            // recovery, so _gr's face list/orientations are not usable here. The quads sit on
+            // the faces of structured (transfinite/extruded) blocks; the region to mesh is the
+            // adjacent one that is NOT structured. Its OCC solid decides the side.
+            GRegion *target = nullptr;
+            std::list<GRegion *> regs = gf->regions();
+            for(auto rit = regs.begin(); rit != regs.end(); ++rit) {
+              GRegion *r = *rit;
+              ExtrudeParams *rep = r->meshAttributes.extrude;
+              bool structured = r->meshAttributes.method == MESH_TRANSFINITE ||
+                                (rep && rep->mesh.ExtrudeMesh && rep->geo.Mode == EXTRUDED_ENTITY);
+              if(!structured) { target = r; break; }
+            }
+            if(target) {
+              // Decide from the TRUE surface point, not the quad's chord centroid: on a curved
+              // face the chord sits a sagitta inside the solid (1 mm quads on r = 6.8 mm: 18 um,
+              // more than the probe offset) and both probes land on the same side. Try several
+              // quads until one decides.
+              for(std::size_t k = 0; k < gf->quadrangles.size() && sideSign == 0.0 && k < 12; k += std::max<std::size_t>(1, gf->quadrangles.size() / 12)) {
+                MQuadrangle *q0 = gf->quadrangles[k];
+                SVector3 n0 = crossprod(SVector3(q0->getVertex(0)->point(), q0->getVertex(1)->point()),
+                                        SVector3(q0->getVertex(0)->point(), q0->getVertex(3)->point()));
+                n0.normalize();
+                SPoint3 c0 = q0->barycenter();
+                SPoint2 uv0 = gf->parFromPoint(c0);
+                GPoint gp0 = gf->point(uv0);
+                if(gp0.succeeded()) c0 = SPoint3(gp0.x(), gp0.y(), gp0.z());
+                double e0 = q0->getVertex(0)->distance(q0->getVertex(1));
+                double e1 = q0->getVertex(1)->distance(q0->getVertex(2));
+                double h0 = 0.5 * std::min(e0, e1);
+                SPoint3 pPlus(c0.x() + h0 * n0.x(), c0.y() + h0 * n0.y(), c0.z() + h0 * n0.z());
+                SPoint3 pMinus(c0.x() - h0 * n0.x(), c0.y() - h0 * n0.y(), c0.z() - h0 * n0.z());
+                bool plusIn = target->containsPoint(pPlus), minusIn = target->containsPoint(pMinus);
+                if(plusIn && !minusIn) sideSign = 1.0;
+                else if(minusIn && !plusIn) sideSign = -1.0;
+              }
+              if(sideSign == 0.0)
+                Msg::Info("Pyramid apex side undecidable on surface %d (volume %d): apices stay on the quads",
+                          gf->tag(), target->tag());
+              else
+                Msg::Info("Pyramid apices of surface %d placed inside volume %d (%zu quads)",
+                          gf->tag(), target->tag(), gf->quadrangles.size());
+            }
+            else
+              Msg::Info("Pyramid apex: no unstructured volume adjacent to surface %d: apices stay on the quads", gf->tag());
+          }
           for(std::size_t i = 0; i < gf->quadrangles.size(); i++) {
             MVertex *v0 = gf->quadrangles[i]->getVertex(0);
             MVertex *v1 = gf->quadrangles[i]->getVertex(1);
             MVertex *v2 = gf->quadrangles[i]->getVertex(2);
             MVertex *v3 = gf->quadrangles[i]->getVertex(3);
-            MVertex *newv =
-              new MVertex((v0->x() + v1->x() + v2->x() + v3->x()) * 0.25,
-                          (v0->y() + v1->y() + v2->y() + v3->y()) * 0.25,
-                          (v0->z() + v1->z() + v2->z() + v3->z()) * 0.25, gf);
+            double cx = (v0->x() + v1->x() + v2->x() + v3->x()) * 0.25;
+            double cy = (v0->y() + v1->y() + v2->y() + v3->y()) * 0.25;
+            double cz = (v0->z() + v1->z() + v2->z() + v3->z()) * 0.25;
+            if(sideSign != 0.0) {
+              SVector3 n = crossprod(SVector3(v0->point(), v1->point()), SVector3(v0->point(), v3->point()));
+              n.normalize();
+              double emin = std::min(std::min(v0->distance(v1), v1->distance(v2)),
+                                     std::min(v2->distance(v3), v3->distance(v0)));
+              double h = 0.4 * emin;
+              SPoint2 uv = gf->parFromPoint(SPoint3(cx, cy, cz));
+              double lc = BGM_MeshSize(gf, uv.x(), uv.y(), cx, cy, cz);
+              if(lc > 0.0 && lc < 1e21) h = std::min(h, 0.3 * lc);
+              // the size field is sampled (Distance fields: NumPointsPerSurface) and can read the
+              // far-field size right next to a conductor; the caller's hard cap is the safeguard
+              if(CTX::instance()->mesh.pyramidApexMaxHeight > 0.0)
+                h = std::min(h, CTX::instance()->mesh.pyramidApexMaxHeight);
+              cx += sideSign * h * n.x(); cy += sideSign * h * n.y(); cz += sideSign * h * n.z();
+            }
+            MVertex *newv = new MVertex(cx, cy, cz, gf);
             // the extra vertex will be added in a GRegion (and reclassified
             // correctly on that GRegion) when the pyramid is generated
             MFace mf = gf->quadrangles[i]->getFace(0);

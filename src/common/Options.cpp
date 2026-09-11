@@ -5162,6 +5162,12 @@ double opt_mesh_tolerance_edge_length(OPT_ARGS_NUM)
   return CTX::instance()->mesh.toleranceEdgeLength;
 }
 
+double opt_mesh_pyramid_apex_max_height(OPT_ARGS_NUM)
+{
+  if(action & GMSH_SET) CTX::instance()->mesh.pyramidApexMaxHeight = val;
+  return CTX::instance()->mesh.pyramidApexMaxHeight;
+}
+
 double opt_mesh_tolerance_initial_delaunay(OPT_ARGS_NUM)
 {
   if(action & GMSH_SET) {

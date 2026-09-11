@@ -23,6 +23,7 @@ struct contextMeshOptions {
   double allowSwapEdgeAngle;
   double qualityInf, qualitySup, radiusInf, radiusSup;
   double lcMin, lcMax, toleranceEdgeLength, toleranceInitialDelaunay;
+  double pyramidApexMaxHeight;   // OMFEM: cap on the hybrid-mesh pyramid apex offset (model units, 0 = no cap)
   double anisoMax, smoothRatio;
   int lcFromPoints, lcFromParametricPoints, lcFromCurvature, lcFromCurvatureIso;
   int lcExtendFromBoundary, checkSurfaceNormalValidity;
