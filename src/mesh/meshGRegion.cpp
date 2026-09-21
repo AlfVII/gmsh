@@ -89,12 +89,32 @@ int splitQuadRecovery::buildPyramids(GModel *gm)
 
 static void _deleteUnusedVertices(GRegion *gr)
 {
-  std::set<MVertex *, MVertexPtrLessThan> allverts;
+  std::set<MVertex *, MVertexPtrLessThan> allverts, used;
   for(std::size_t i = 0; i < gr->tetrahedra.size(); i++) {
     for(int j = 0; j < 4; j++) {
-      if(gr->tetrahedra[i]->getVertex(j)->onWhat() == gr)
-        allverts.insert(gr->tetrahedra[i]->getVertex(j));
+      MVertex *v = gr->tetrahedra[i]->getVertex(j);
+      used.insert(v);
+      if(v->onWhat() == gr) allverts.insert(v);
     }
+  }
+  // Boundary recovery inserts Steiner points classified on a GFace (or GEdge) but
+  // stores them in this region's mesh_vertices. Rebuilding the list below from the
+  // vertices classified on gr alone used to drop them from EVERY entity while
+  // tetrahedra (and the face's triangles) still referenced them: they were never
+  // numbered and were written as node 0 (OMFEM ABT #1289: 112-180 such tets per
+  // mesh on a faceted toroid). Re-home each such vertex that is still in use into
+  // the list of the entity it is classified on, unless it is already there.
+  std::map<GEntity *, std::vector<MVertex *> > rehome;
+  for(std::size_t i = 0; i < gr->mesh_vertices.size(); i++) {
+    MVertex *v = gr->mesh_vertices[i];
+    GEntity *ge = v->onWhat();
+    if(ge && ge != gr && used.count(v)) rehome[ge].push_back(v);
+  }
+  for(auto &it : rehome) {
+    std::set<MVertex *> have(it.first->mesh_vertices.begin(),
+                             it.first->mesh_vertices.end());
+    for(MVertex *v : it.second)
+      if(have.insert(v).second) it.first->mesh_vertices.push_back(v);
   }
   for(std::size_t i = 0; i < gr->mesh_vertices.size(); i++) {
     // FIXME: investigate crash on exit (e.g. t16.geo)
