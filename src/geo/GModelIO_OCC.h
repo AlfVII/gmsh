@@ -58,6 +58,22 @@ private:
   TopTools_DataMapOfShapeInteger _wireTag, _shellTag;
   TopTools_DataMapOfIntegerShape _tagWire, _tagShell;
 
+  // use counts of sub-shapes in the BOUND parents (the values of _tagEdge,
+  // _tagFace and _tagSolid): how many bound edges hold a vertex, bound faces
+  // an edge or a wire, bound solids a face or a shell. _unbind() asks "is this
+  // sub-shape still used by a bound parent?" for every sub-shape it removes;
+  // scanning all bound parents for each one was O(N^2) and dominated booleans
+  // on large models (a 13.6k-face solid: 800 s of a 842 s cut). Kept up to
+  // date by _bind()/_unbind(); bulk unbinds just invalidate it, and it is
+  // rebuilt on the next query.
+  bool _ancValid;
+  TopTools_DataMapOfShapeInteger _ancVertex, _ancEdge, _ancWire, _ancFace,
+    _ancShell;
+  void _ancCount(int parentDim, const TopoDS_Shape &parent, int delta);
+  void _ancEnsure();
+  bool _ancUsed(const TopTools_DataMapOfShapeInteger &m,
+                const TopoDS_Shape &s);
+
   // cache of <dim,tag> pairs corresponding to entities that will need to be
   // removed from the model at the next synchronization
   std::set<std::pair<int, int> > _toRemove;
