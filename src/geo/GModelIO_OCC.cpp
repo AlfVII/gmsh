@@ -172,7 +172,68 @@ OCC_Internals::OCC_Internals()
   for(int i = 0; i < 6; i++)
     _maxTag[i] = CTX::instance()->geom.firstEntityTag - 1;
   _changed = true;
+  _ancValid = false;
   _attributes = new OCCAttributesRTree(CTX::instance()->geom.tolerance);
+}
+
+void OCC_Internals::_ancCount(int parentDim, const TopoDS_Shape &parent,
+                              int delta)
+{
+  if(!_ancValid || parent.IsNull()) return;
+  auto add = [delta](TopTools_DataMapOfShapeInteger &m, const TopoDS_Shape &p,
+                     TopAbs_ShapeEnum type) {
+    // unique sub-shapes: a seam edge appears twice in its face, but the face
+    // is one user of it
+    TopTools_IndexedMapOfShape subs;
+    TopExp::MapShapes(p, type, subs);
+    for(int i = 1; i <= subs.Extent(); i++) {
+      const TopoDS_Shape &c = subs(i);
+      if(m.IsBound(c)) {
+        int n = m.Find(c) + delta;
+        if(n > 0) m.ChangeFind(c) = n;
+        else m.UnBind(c);
+      }
+      else if(delta > 0)
+        m.Bind(c, delta);
+    }
+  };
+  switch(parentDim) {
+  case 1: add(_ancVertex, parent, TopAbs_VERTEX); break;
+  case 2:
+    add(_ancEdge, parent, TopAbs_EDGE);
+    add(_ancWire, parent, TopAbs_WIRE);
+    break;
+  case 3:
+    add(_ancFace, parent, TopAbs_FACE);
+    add(_ancShell, parent, TopAbs_SHELL);
+    break;
+  default: break;
+  }
+}
+
+void OCC_Internals::_ancEnsure()
+{
+  if(_ancValid) return;
+  _ancVertex.Clear();
+  _ancEdge.Clear();
+  _ancWire.Clear();
+  _ancFace.Clear();
+  _ancShell.Clear();
+  _ancValid = true;
+  TopTools_DataMapIteratorOfDataMapOfIntegerShape it;
+  for(it.Initialize(_tagEdge); it.More(); it.Next())
+    _ancCount(1, it.Value(), 1);
+  for(it.Initialize(_tagFace); it.More(); it.Next())
+    _ancCount(2, it.Value(), 1);
+  for(it.Initialize(_tagSolid); it.More(); it.Next())
+    _ancCount(3, it.Value(), 1);
+}
+
+bool OCC_Internals::_ancUsed(const TopTools_DataMapOfShapeInteger &m,
+                             const TopoDS_Shape &s)
+{
+  _ancEnsure();
+  return m.IsBound(s);
 }
 
 OCC_Internals::~OCC_Internals() { delete _attributes; }
@@ -254,8 +315,10 @@ void OCC_Internals::_bind(const TopoDS_Edge &edge, int tag, bool recursive)
       // this leaves the old edge bound in _edgeTag, but we cannot remove it
       Msg::Info("Rebinding OpenCASCADE curve %d", tag);
     }
+    if(_tagEdge.IsBound(tag)) _ancCount(1, _tagEdge.Find(tag), -1);
     _edgeTag.Bind(edge, tag);
     _tagEdge.Bind(tag, edge);
+    _ancCount(1, edge, 1);
     setMaxTag(1, tag);
     _changed = true;
     _attributes->insert(new OCCAttributes(1, edge));
@@ -317,8 +380,10 @@ void OCC_Internals::_bind(const TopoDS_Face &face, int tag, bool recursive)
       // this leaves the old face bound in _faceTag, but we cannot remove it
       Msg::Info("Rebinding OpenCASCADE surface %d", tag);
     }
+    if(_tagFace.IsBound(tag)) _ancCount(2, _tagFace.Find(tag), -1);
     _faceTag.Bind(face, tag);
     _tagFace.Bind(tag, face);
+    _ancCount(2, face, 1);
     setMaxTag(2, tag);
     _changed = true;
     _attributes->insert(new OCCAttributes(2, face));
@@ -387,8 +452,10 @@ void OCC_Internals::_bind(const TopoDS_Solid &solid, int tag, bool recursive)
       // this leaves the old solid bound in _solidTag, but we cannot remove it
       Msg::Info("Rebinding OpenCASCADE volume %d", tag);
     }
+    if(_tagSolid.IsBound(tag)) _ancCount(3, _tagSolid.Find(tag), -1);
     _solidTag.Bind(solid, tag);
     _tagSolid.Bind(tag, solid);
+    _ancCount(3, solid, 1);
     setMaxTag(3, tag);
     _changed = true;
     _attributes->insert(new OCCAttributes(3, solid));
@@ -428,14 +495,7 @@ void OCC_Internals::_bind(TopoDS_Shape shape, int dim, int tag, bool recursive)
 void OCC_Internals::_unbind(const TopoDS_Vertex &vertex, int tag,
                             bool recursive)
 {
-  TopTools_DataMapIteratorOfDataMapOfIntegerShape exp0(_tagEdge);
-  for(; exp0.More(); exp0.Next()) {
-    TopoDS_Edge edge = TopoDS::Edge(exp0.Value());
-    TopExp_Explorer exp1;
-    for(exp1.Init(edge, TopAbs_VERTEX); exp1.More(); exp1.Next()) {
-      if(exp1.Current().IsSame(vertex)) return;
-    }
-  }
+  if(_ancUsed(_ancVertex, vertex)) return; // still in a bound edge
   std::pair<int, int> dimTag(0, tag);
   if(_toPreserve.find(dimTag) != _toPreserve.end()) return;
   _vertexTag.UnBind(vertex);
@@ -447,16 +507,10 @@ void OCC_Internals::_unbind(const TopoDS_Vertex &vertex, int tag,
 
 void OCC_Internals::_unbind(const TopoDS_Edge &edge, int tag, bool recursive)
 {
-  TopTools_DataMapIteratorOfDataMapOfIntegerShape exp2(_tagFace);
-  for(; exp2.More(); exp2.Next()) {
-    TopoDS_Face face = TopoDS::Face(exp2.Value());
-    TopExp_Explorer exp1;
-    for(exp1.Init(face, TopAbs_EDGE); exp1.More(); exp1.Next()) {
-      if(exp1.Current().IsSame(edge)) return;
-    }
-  }
+  if(_ancUsed(_ancEdge, edge)) return; // still in a bound face
   std::pair<int, int> dimTag(1, tag);
   if(_toPreserve.find(dimTag) != _toPreserve.end()) return;
+  if(_tagEdge.IsBound(tag)) _ancCount(1, _tagEdge.Find(tag), -1);
   _edgeTag.UnBind(edge);
   _tagEdge.UnBind(tag);
   _toRemove.insert(dimTag);
@@ -476,14 +530,7 @@ void OCC_Internals::_unbind(const TopoDS_Edge &edge, int tag, bool recursive)
 
 void OCC_Internals::_unbind(const TopoDS_Wire &wire, int tag, bool recursive)
 {
-  TopTools_DataMapIteratorOfDataMapOfIntegerShape exp0(_tagFace);
-  for(; exp0.More(); exp0.Next()) {
-    TopoDS_Face face = TopoDS::Face(exp0.Value());
-    TopExp_Explorer exp1;
-    for(exp1.Init(face, TopAbs_WIRE); exp1.More(); exp1.Next()) {
-      if(exp1.Current().IsSame(wire)) return;
-    }
-  }
+  if(_ancUsed(_ancWire, wire)) return; // still in a bound face
   std::pair<int, int> dimTag(-1, tag);
   if(_toPreserve.find(dimTag) != _toPreserve.end()) return;
   _wireTag.UnBind(wire);
@@ -505,16 +552,10 @@ void OCC_Internals::_unbind(const TopoDS_Wire &wire, int tag, bool recursive)
 
 void OCC_Internals::_unbind(const TopoDS_Face &face, int tag, bool recursive)
 {
-  TopTools_DataMapIteratorOfDataMapOfIntegerShape exp2(_tagSolid);
-  for(; exp2.More(); exp2.Next()) {
-    TopoDS_Solid solid = TopoDS::Solid(exp2.Value());
-    TopExp_Explorer exp1;
-    for(exp1.Init(solid, TopAbs_FACE); exp1.More(); exp1.Next()) {
-      if(exp1.Current().IsSame(face)) return;
-    }
-  }
+  if(_ancUsed(_ancFace, face)) return; // still in a bound solid
   std::pair<int, int> dimTag(2, tag);
   if(_toPreserve.find(dimTag) != _toPreserve.end()) return;
+  if(_tagFace.IsBound(tag)) _ancCount(2, _tagFace.Find(tag), -1);
   _faceTag.UnBind(face);
   _tagFace.UnBind(tag);
   _toRemove.insert(dimTag);
@@ -541,14 +582,7 @@ void OCC_Internals::_unbind(const TopoDS_Face &face, int tag, bool recursive)
 
 void OCC_Internals::_unbind(const TopoDS_Shell &shell, int tag, bool recursive)
 {
-  TopTools_DataMapIteratorOfDataMapOfIntegerShape exp0(_tagSolid);
-  for(; exp0.More(); exp0.Next()) {
-    TopoDS_Solid solid = TopoDS::Solid(exp0.Value());
-    TopExp_Explorer exp1;
-    for(exp1.Init(solid, TopAbs_SHELL); exp1.More(); exp1.Next()) {
-      if(exp1.Current().IsSame(shell)) return;
-    }
-  }
+  if(_ancUsed(_ancShell, shell)) return; // still in a bound solid
   std::pair<int, int> dimTag(-2, tag);
   if(_toPreserve.find(dimTag) != _toPreserve.end()) return;
   _shellTag.UnBind(shell);
@@ -572,6 +606,7 @@ void OCC_Internals::_unbind(const TopoDS_Solid &solid, int tag, bool recursive)
 {
   std::pair<int, int> dimTag(3, tag);
   if(_toPreserve.find(dimTag) != _toPreserve.end()) return;
+  if(_tagSolid.IsBound(tag)) _ancCount(3, _tagSolid.Find(tag), -1);
   _solidTag.UnBind(solid);
   _tagSolid.UnBind(tag);
   _toRemove.insert(dimTag);
@@ -612,6 +647,7 @@ void OCC_Internals::_unbind(TopoDS_Shape shape, int dim, int tag,
 
 void OCC_Internals::_unbindWithoutChecks(TopoDS_Shape shape)
 {
+  _ancValid = false;
   TopExp_Explorer exp0;
   for(exp0.Init(shape, TopAbs_SOLID); exp0.More(); exp0.Next()) {
     TopoDS_Solid solid = TopoDS::Solid(exp0.Current());
@@ -695,6 +731,7 @@ void OCC_Internals::_unbind()
   exp.Initialize(_tagShell);
   for(; exp.More(); exp.Next()) _toRemove.insert(std::make_pair(-2, exp.Key()));
 
+  _ancValid = false;
   _tagVertex.Clear();
   _tagEdge.Clear();
   _tagFace.Clear();
