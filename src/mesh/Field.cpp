@@ -2493,10 +2493,67 @@ template <typename Derived> struct PointCloudAdaptor {
   }
 };
 
+// Sampling at an ABSOLUTE spacing d (OpenMagnetics, 2026-10-03). GFace::fillPointCloud puts an N x N barycentric
+// lattice on every STL triangle, N = longest edge / (face diagonal / Sampling): about Sampling^2 points per face
+// whatever its size, and on a long thin triangle a fixed spacing gives N^2 points for no area. On a wound magnetic
+// (02_flyback: 20,552 copper faces, 13,488 of them under 0.01 mm^2) Sampling = 100 built ~2e8 points, >13 GB.
+// Here every triangle is covered by rows parallel to its LONGEST edge, ceil(height/d) rows, each row split at
+// spacing d: the point count is ~area/d^2 for any triangle shape. Lengths are measured in xyz; for a face
+// triangulated in (u,v) the rows are laid out in (u,v) and evaluated on the surface.
+static void distanceSampleFaceBySpacing(GFace *f, double d, std::vector<SPoint3> &pts,
+                                        std::vector<SPoint2> *uvpts)
+{
+  if(!f->buildSTLTriangulation()) return;
+  const bool xyz = !f->stl_vertices_xyz.empty();
+  for(std::size_t i = 0; i + 2 < f->stl_triangles.size(); i += 3) {
+    SPoint3 X[3];
+    SPoint2 U[3];
+    for(int k = 0; k < 3; k++) {
+      const int v = f->stl_triangles[i + k];
+      if(xyz) X[k] = f->stl_vertices_xyz[v];
+      else {
+        U[k] = f->stl_vertices_uv[v];
+        GPoint gp = f->point(U[k]);
+        X[k] = SPoint3(gp.x(), gp.y(), gp.z());
+      }
+    }
+    // longest edge = base (a -> b), apex c
+    int a = 0;
+    double lmax = -1.;
+    for(int k = 0; k < 3; k++) {
+      const double l = X[k].distance(X[(k + 1) % 3]);
+      if(l > lmax) { lmax = l; a = k; }
+    }
+    const int b = (a + 1) % 3, c = (a + 2) % 3;
+    const SVector3 e1(X[a], X[b]), e2(X[a], X[c]);
+    const double area2 = crossprod(e1, e2).norm();            // twice the area
+    const double height = lmax > 0. ? area2 / lmax : 0.;
+    const int nRows = std::max(1, (int)std::ceil(height / d));
+    for(int r = 0; r <= nRows; r++) {
+      const double t = (double)r / nRows;                     // 0 = base, 1 = apex
+      const int m = std::max(1, (int)std::ceil((1. - t) * lmax / d));
+      for(int q = 0; q <= m; q++) {
+        if(r == nRows && q > 0) break;                        // the apex row is one point
+        const double s = (double)q / m;
+        // P = a + t (c - a), Q = b + t (c - b); point = P + s (Q - P)
+        const double wa = (1. - t) * (1. - s), wb = (1. - t) * s, wc = t;
+        if(xyz) pts.push_back(X[a] * wa + X[b] * wb + X[c] * wc);
+        else {
+          SPoint2 uv = U[a] * wa + U[b] * wb + U[c] * wc;
+          GPoint gp = f->point(uv);
+          pts.push_back(SPoint3(gp.x(), gp.y(), gp.z()));
+          if(uvpts) uvpts->push_back(uv);
+        }
+      }
+    }
+  }
+}
+
 class DistanceField : public Field {
   std::list<int> _pointTags, _curveTags, _surfaceTags;
   std::vector<AttractorInfo> _infos;
   int _sampling;
+  double _samplingDistance;
   int _xFieldId, _yFieldId, _zFieldId; // unused
   SPoint3Cloud _pc;
   SPoint3CloudAdaptor<SPoint3Cloud> _pc2kdtree;
@@ -2504,7 +2561,7 @@ class DistanceField : public Field {
   std::size_t _outIndex;
 
 public:
-  DistanceField() : _pc2kdtree(_pc), _kdtree(nullptr), _outIndex(0)
+  DistanceField() : _samplingDistance(0.), _pc2kdtree(_pc), _kdtree(nullptr), _outIndex(0)
   {
     _sampling = 20;
 
@@ -2519,6 +2576,10 @@ public:
     options["Sampling"] = new FieldOptionInt(
       _sampling, "Linear (i.e. per dimension) number of sampling points to "
       "discretize each curve and surface", &updateNeeded);
+    options["SamplingDistance"] = new FieldOptionDouble(
+      _samplingDistance, "Absolute spacing of the sampling points on curves and "
+      "surfaces; surfaces are sampled proportionally to their area. 0: use "
+      "Sampling (relative to each entity's size)", &updateNeeded);
 
     // deprecated names
     options["NodesList"] =
@@ -2539,7 +2600,7 @@ public:
       new FieldOptionInt(_sampling, "[Deprecated]", &updateNeeded, true);
   }
   DistanceField(int dim, int tag, int nbe)
-    : _sampling(nbe), _pc2kdtree(_pc), _kdtree(nullptr), _outIndex(0)
+    : _sampling(nbe), _samplingDistance(0.), _pc2kdtree(_pc), _kdtree(nullptr), _outIndex(0)
   {
     if(dim == 0)
       _pointTags.push_back(tag);
@@ -2599,7 +2660,13 @@ public:
               _infos.push_back(AttractorInfo(*it, 1, t, 0));
             }
           }
-          int NNN = _sampling - e->mesh_vertices.size();
+          int nSamp = _sampling;
+          if(_samplingDistance > 0.) {
+            Range<double> bb = e->parBounds(0);
+            nSamp = std::max(2, (int)std::ceil(e->length(bb.low(), bb.high(), 20) /
+                                               _samplingDistance) + 1);
+          }
+          int NNN = nSamp - e->mesh_vertices.size();
           for(int i = 1; i < NNN - 1; i++) {
             double u = (double)i / (NNN - 1);
             Range<double> b = e->parBounds(0);
@@ -2617,9 +2684,13 @@ public:
       for(auto it = _surfaceTags.begin(); it != _surfaceTags.end(); ++it) {
         GFace *f = GModel::current()->getFaceByTag(*it);
         if(f) {
-          double maxDist = f->bounds().diag() / _sampling;
           std::vector<SPoint2> uvpoints;
-          f->fillPointCloud(maxDist, &_pc.pts, &uvpoints);
+          if(_samplingDistance > 0.)
+            distanceSampleFaceBySpacing(f, _samplingDistance, _pc.pts, &uvpoints);
+          else {
+            double maxDist = f->bounds().diag() / _sampling;
+            f->fillPointCloud(maxDist, &_pc.pts, &uvpoints);
+          }
           for(std::size_t i = 0; i < uvpoints.size(); i++)
             _infos.push_back
               (AttractorInfo(*it, 2, uvpoints[i].x(), uvpoints[i].y()));
