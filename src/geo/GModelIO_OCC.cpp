@@ -22,6 +22,8 @@
 #if defined(HAVE_OCC)
 
 #include <BRepAlgoAPI_Common.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Compound.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Section.hxx>
@@ -4053,7 +4055,34 @@ bool OCC_Internals::booleanOperator(
       BRepAlgoAPI_BuilderAlgo fragments;
       objectShapes.Append(toolShapes);
       toolShapes.Clear();
-      fragments.SetArguments(objectShapes);
+      // DISJOINT TOOLS (om-4.15.2). OpenCASCADE intersects every argument with every
+      // other one, and never an argument with itself. Shapes the caller has proven
+      // mutually disjoint (the last occBooleanDisjointTools ones) therefore go in as
+      // ONE compound argument: they are still intersected with all the others, but
+      // the face/face tests between them -- all of a multi-winding fragment's time --
+      // are not made. History is asked per original shape below, as before.
+      int nDisjoint = CTX::instance()->geom.occBooleanDisjointTools;
+      if(nDisjoint > objectShapes.Extent() - 1) {
+        Msg::Error("OCCBooleanDisjointTools (%d) exceeds the number of tool shapes",
+                   nDisjoint);
+        return false;
+      }
+      TopTools_ListOfShape arguments;
+      if(nDisjoint > 1) {
+        BRep_Builder bb;
+        TopoDS_Compound disjoint;
+        bb.MakeCompound(disjoint);
+        int k = 0, first = objectShapes.Extent() - nDisjoint;
+        TopTools_ListIteratorOfListOfShape ia(objectShapes);
+        for(; ia.More(); ia.Next(), k++) {
+          if(k < first) arguments.Append(ia.Value());
+          else bb.Add(disjoint, ia.Value());
+        }
+        arguments.Append(disjoint);
+      }
+      else
+        arguments = objectShapes;
+      fragments.SetArguments(arguments);
       _setBooleanOptions(fragments);
 #if OCC_VERSION_HEX >= 0x070700
       OCCBooleanProgress progress("Fragments");

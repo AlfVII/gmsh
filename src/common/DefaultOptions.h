@@ -979,6 +979,10 @@ StringXNumber GeometryOptions_Number[] = {
     "new entities with the OpenCASCADE kernel" },
   { F|O, "OCCBooleanCheckInverted" , opt_geometry_occ_boolean_check_inverted , 1. ,
     "Check input solid in boolean operations for inverted status?" },
+  { F|O, "OCCBooleanDisjointTools" , opt_geometry_occ_boolean_disjoint_tools , 0. ,
+    "Number of trailing tool shapes of a boolean fragment that the caller guarantees are "
+    "mutually disjoint: they are passed to OpenCASCADE as one compound argument, so they "
+    "are intersected with every other argument but not with each other (0: none)" },
   { F|O, "OCCBooleanGlue" , opt_geometry_occ_boolean_glue , 0. ,
     "Try to speed up boolean operation by speeding up the interference between "
     "shapes that do overlap but do not have real intersections (0: off, 1: allow "

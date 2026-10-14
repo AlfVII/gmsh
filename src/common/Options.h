@@ -425,6 +425,7 @@ double opt_geometry_occ_make_solids(OPT_ARGS_NUM);
 double opt_geometry_occ_parallel(OPT_ARGS_NUM);
 double opt_geometry_occ_boolean_check_inverted(OPT_ARGS_NUM);
 double opt_geometry_occ_boolean_glue(OPT_ARGS_NUM);
+double opt_geometry_occ_boolean_disjoint_tools(OPT_ARGS_NUM);
 double opt_geometry_occ_boolean_non_destructive(OPT_ARGS_NUM);
 double opt_geometry_occ_boolean_preserve_numbering(OPT_ARGS_NUM);
 double opt_geometry_occ_boolean_simplify(OPT_ARGS_NUM);

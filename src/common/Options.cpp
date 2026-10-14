@@ -4785,6 +4785,13 @@ double opt_geometry_occ_boolean_check_inverted(OPT_ARGS_NUM)
   return CTX::instance()->geom.occBooleanCheckInverted;
 }
 
+double opt_geometry_occ_boolean_disjoint_tools(OPT_ARGS_NUM)
+{
+  if(action & GMSH_SET)
+    CTX::instance()->geom.occBooleanDisjointTools = (int)val;
+  return CTX::instance()->geom.occBooleanDisjointTools;
+}
+
 double opt_geometry_occ_boolean_glue(OPT_ARGS_NUM)
 {
   if(action & GMSH_SET)
