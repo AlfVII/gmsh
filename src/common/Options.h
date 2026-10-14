@@ -478,6 +478,7 @@ double opt_mesh_lc_integration_precision(OPT_ARGS_NUM);
 double opt_mesh_check_surface_normal_validity(OPT_ARGS_NUM);
 double opt_mesh_rand_factor(OPT_ARGS_NUM);
 double opt_mesh_rand_factor3d(OPT_ARGS_NUM);
+double opt_mesh_min_inserted_tet_volume_ratio(OPT_ARGS_NUM);
 double opt_mesh_quality_inf(OPT_ARGS_NUM);
 double opt_mesh_quality_sup(OPT_ARGS_NUM);
 double opt_mesh_quality_type(OPT_ARGS_NUM);

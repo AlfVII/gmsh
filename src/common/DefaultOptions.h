@@ -1537,6 +1537,11 @@ StringXNumber MeshOptions_Number[] = {
     "RandomFactor * size(triangle)/size(model) approaches machine accuracy)" },
   { F|O, "RandomFactor3D" , opt_mesh_rand_factor3d , 1.e-12 ,
     "Random factor used in the 3D meshing algorithm" },
+  { F|O, "MinInsertedTetVolumeRatio" , opt_mesh_min_inserted_tet_volume_ratio , 0. ,
+    "3D Delaunay refinement (Algorithm3D 1): refuse a point whose insertion would create a "
+    "tetrahedron of volume below this ratio times the cube of its longest edge -- a point "
+    "coplanar with a cavity face up to rounding, or within a hair of an existing vertex "
+    "(0: off, every point the cavity test accepts is inserted)" },
   { F|O, "RandomSeed" , opt_mesh_random_seed , 1. ,
     "Seed of pseudo-random number generator" },
 

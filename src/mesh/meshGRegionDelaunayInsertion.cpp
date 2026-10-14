@@ -483,6 +483,30 @@ bool insertVertexB(std::vector<faceXtet> &shell, std::vector<MTet4 *> &cavity,
        distance(it->v[2], v) < lc * .05)
       onePointIsTooClose = true;
 
+    // A point the cavity test accepts can still make a tet with no volume to speak of: the
+    // visibility predicate is exact, so a point coplanar with a shell face up to rounding (a
+    // circumcentre on a line parallel to two straight CAD edges) passes it, and the distance
+    // test above only sees the shell's own vertices. Refuse such a point as too close.
+    const double minRatio = CTX::instance()->mesh.minInsertedTetVolumeRatio;
+    if(minRatio > 0. && !onePointIsTooClose) {
+      double p[4][3];
+      for(int k = 0; k < 4; k++) {
+        MVertex *q = k < 3 ? it->v[k] : v;
+        p[k][0] = q->x();
+        p[k][1] = q->y();
+        p[k][2] = q->z();
+      }
+      double lmax = 0.;
+      for(int a = 0; a < 4; a++)
+        for(int b = a + 1; b < 4; b++)
+          lmax = std::max(lmax, std::sqrt((p[a][0] - p[b][0]) * (p[a][0] - p[b][0]) +
+                                          (p[a][1] - p[b][1]) * (p[a][1] - p[b][1]) +
+                                          (p[a][2] - p[b][2]) * (p[a][2] - p[b][2])));
+      const double vol =
+        std::abs(robustPredicates::orient3d(p[0], p[1], p[2], p[3])) / 6.;
+      if(vol < minRatio * lmax * lmax * lmax) onePointIsTooClose = true;
+    }
+
     new_tets.push_back(t4);
     new_cavity.push_back(t4);
 

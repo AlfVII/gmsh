@@ -5304,6 +5304,12 @@ double opt_mesh_rand_factor(OPT_ARGS_NUM)
   return CTX::instance()->mesh.randFactor;
 }
 
+double opt_mesh_min_inserted_tet_volume_ratio(OPT_ARGS_NUM)
+{
+  if(action & GMSH_SET) CTX::instance()->mesh.minInsertedTetVolumeRatio = val;
+  return CTX::instance()->mesh.minInsertedTetVolumeRatio;
+}
+
 double opt_mesh_rand_factor3d(OPT_ARGS_NUM)
 {
   if(action & GMSH_SET) {
