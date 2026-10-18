@@ -746,7 +746,15 @@ namespace tetgenBR {
 
       carveholes();
 
-      if(subvertstack->objects > 0l) { suppresssteinerpoints(); }
+      // Suppressing a boundary Steiner point moves it into the volume along the line from a
+      // cavity point toward it, sampling ever closer to the surface until the star is valid: the
+      // point can end up nanometres off the surface it replaced, with no-volume tets between
+      // them. Mesh.KeepBoundarySteinerPoints leaves such points on the surface instead; the
+      // surfaces and curves carrying them are remeshed with them below.
+      if(subvertstack->objects > 0l &&
+         !CTX::instance()->mesh.keepBoundarySteinerPoints) {
+        suppresssteinerpoints();
+      }
 
       recoverdelaunay();
 

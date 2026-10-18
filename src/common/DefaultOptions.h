@@ -1542,6 +1542,11 @@ StringXNumber MeshOptions_Number[] = {
     "tetrahedron of volume below this ratio times the cube of its longest edge -- a point "
     "coplanar with a cavity face up to rounding, or within a hair of an existing vertex "
     "(0: off, every point the cavity test accepts is inserted)" },
+  { F|O, "KeepBoundarySteinerPoints" , opt_mesh_keep_boundary_steiner_points , 0. ,
+    "3D Delaunay boundary recovery: leave the Steiner points it had to add on a surface or a "
+    "curve where they are, and remesh those surfaces with them, instead of suppressing them "
+    "into the volume -- a suppressed point can land a hair off the surface it replaced and "
+    "leave tetrahedra with no volume there (0: suppress them, as tetgen's -Y does)" },
   { F|O, "RandomSeed" , opt_mesh_random_seed , 1. ,
     "Seed of pseudo-random number generator" },
 

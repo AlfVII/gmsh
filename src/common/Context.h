@@ -21,6 +21,7 @@ struct contextMeshOptions {
   int smoothCrossField, crossFieldClosestPoint;
   double lcFactor, randFactor, randFactor3d, lcIntegrationPrecision;
   double minInsertedTetVolumeRatio;
+  int keepBoundarySteinerPoints;
   double optimizeThreshold, normals, tangents, explode, angleSmoothNormals;
   double allowSwapEdgeAngle;
   double qualityInf, qualitySup, radiusInf, radiusSup;
