@@ -1386,6 +1386,8 @@ void insertVerticesInRegion(GRegion *gr, int maxIter,
   // here the classification should be done
 
   int ITER = 0, REALCOUNT = 0;
+  // Size of the tet set right after the last memoryCleanup (see the end of the loop).
+  std::size_t tetsAfterCleanup = 0;
   int NB_CORRECTION_OF_CAVITY = 0;
   int COUNT_MISS_1 = 0;
   int COUNT_MISS_2 = 0;
@@ -1526,9 +1528,18 @@ void insertVerticesInRegion(GRegion *gr, int maxIter,
 
     // Normally, a tet mesh contains about 6 times more tets than vertices. This
     // allows to clean up the set of tets when lots of deleted ones are present
-    // in the mesh
-    if(allTets.size() > 7 * vSizes.size() && ITER > 1000) {
+    // in the mesh.
+    // OpenMagnetics: the cleanup walks the WHOLE set, and a mesh whose live tets
+    // already exceed 7 per vertex (dense corridors between touching wires, a large
+    // coarse air box) met the ratio test on EVERY iteration, freeing almost nothing:
+    // 1-2 iterations/s on millions of tets (06_llc, 08_pq), against thousands
+    // without it. The set must also have doubled since the last cleanup, so the
+    // cost is amortized O(1) per insertion and the set stays within twice its live
+    // size. Only already-deleted tets are freed, so the mesh is unchanged.
+    if(allTets.size() > 7 * vSizes.size() && ITER > 1000 &&
+       allTets.size() >= 2 * tetsAfterCleanup) {
       memoryCleanup(myFactory, allTets);
+      tetsAfterCleanup = allTets.size();
     }
   }
 
